@@ -45,6 +45,7 @@ export default function Home() {
   const [teamAPrice, setTeamAPrice] = useState<string>("60");
   const [teamBPrice, setTeamBPrice] = useState<string>("40");
   const [estimatedProbability, setEstimatedProbability] = useState<string>("70");
+  const [feesEnabled, setFeesEnabled] = useState<boolean>(true);
 
   // Results
   const [regularResult, setRegularResult] = useState<RegularResult | null>(null);
@@ -73,7 +74,8 @@ export default function Home() {
     sharePrice: number,
     estProb: number,
     bankrollAmt: number,
-    fk: number
+    fk: number,
+    includeFees: boolean
   ): PolymarketRow[] => {
     const pricePoints: number[] = [];
 
@@ -92,12 +94,14 @@ export default function Home() {
     }
 
     return pricePoints.map((price) => {
-      const oddsB = (1 - price) / price;
+      const feePerShare = includeFees ? 0.03 * price * (1 - price) : 0;
+      const effectiveCost = price + feePerShare;
+      const oddsB = (1 - effectiveCost) / effectiveCost;
       const q = 1 - estProb;
       const kelly = (oddsB * estProb - q) / oddsB;
       const kellyPercent = Math.max(0, kelly * 100) * fk;
       const betAmt = (kellyPercent / 100) * bankrollAmt;
-      const edge = (estProb - price) * 100;
+      const edge = (estProb - effectiveCost) * 100;
 
       return {
         sharePrice: price,
@@ -157,8 +161,8 @@ export default function Home() {
       return;
     }
 
-    const rowsA = generateKellyRows(priceA, estProbA, b, fractionalKelly);
-    const rowsB = generateKellyRows(priceB, estProbB, b, fractionalKelly);
+    const rowsA = generateKellyRows(priceA, estProbA, b, fractionalKelly, feesEnabled);
+    const rowsB = generateKellyRows(priceB, estProbB, b, fractionalKelly, feesEnabled);
 
     setPolymarketResults({
       a: {
@@ -197,6 +201,7 @@ export default function Home() {
     setTeamAPrice("60");
     setTeamBPrice("40");
     setEstimatedProbability("70");
+    setFeesEnabled(true);
     setRegularResult(null);
     setPolymarketResults(null);
   };
@@ -466,6 +471,20 @@ export default function Home() {
                     placeholder="70"
                   />
                 </div>
+
+                {/* Fees Toggle */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={feesEnabled}
+                    onChange={(e) => setFeesEnabled(e.target.checked)}
+                    className="w-4 h-4 accent-purple-300 rounded"
+                  />
+                  <span className="text-white text-sm font-medium">
+                    Include Polymarket fees
+                  </span>
+                  <span className="text-purple-200 text-xs">(3% × p × (1−p))</span>
+                </label>
 
                 {/* Buttons */}
                 <div className="flex gap-3 pt-2">
