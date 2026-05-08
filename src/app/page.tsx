@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type Mode = "regular" | "polymarket";
+type Mode = "regular" | "polymarket" | "comparison";
 
 interface RegularResult {
   kellyPercentage: number;
@@ -18,6 +18,7 @@ interface PolymarketRow {
   edge: number;
   kellyPercentage: number;
   betAmount: number;
+  expectedGrowth: number;
 }
 
 interface PolymarketPanelResult {
@@ -46,6 +47,38 @@ export default function Home() {
   const [teamBPrice, setTeamBPrice] = useState<string>("40");
   const [estimatedProbability, setEstimatedProbability] = useState<string>("70");
   const [feesEnabled, setFeesEnabled] = useState<boolean>(true);
+
+  // Comparison mode (two independent bets)
+  const [bet1Label, setBet1Label] = useState<string>("Bet 1");
+  const [bet1Price, setBet1Price] = useState<string>("60");
+  const [bet1Prob, setBet1Prob] = useState<string>("70");
+  const [bet1Fees, setBet1Fees] = useState<boolean>(true);
+
+  const [bet2Label, setBet2Label] = useState<string>("Bet 2");
+  const [bet2Price, setBet2Price] = useState<string>("45");
+  const [bet2Prob, setBet2Prob] = useState<string>("55");
+  const [bet2Fees, setBet2Fees] = useState<boolean>(true);
+
+  interface ComparisonBetResult {
+    label: string;
+    sharePrice: number;
+    probability: number;
+    feesEnabled: boolean;
+    effectiveCost: number;
+    feePerShare: number;
+    edge: number;
+    fullKelly: number;
+    fractionalKellyPct: number;
+    betAmount: number;
+    shares: number;
+    expectedGrowth: number; // log-growth
+    expectedGrowthPct: number; // (e^G - 1) * 100
+  }
+
+  const [comparisonResults, setComparisonResults] = useState<{
+    a: ComparisonBetResult;
+    b: ComparisonBetResult;
+  } | null>(null);
 
   // Results
   const [regularResult, setRegularResult] = useState<RegularResult | null>(null);
@@ -103,11 +136,21 @@ export default function Home() {
       const betAmt = (kellyPercent / 100) * bankrollAmt;
       const edge = (estProb - effectiveCost) * 100;
 
+      // Expected log-growth rate at fractional Kelly fraction f:
+      //   G = p * ln(1 + f*b) + (1-p) * ln(1 - f)
+      const f = kellyPercent / 100;
+      let expectedGrowth = 0;
+      if (f > 0 && f < 1) {
+        expectedGrowth =
+          estProb * Math.log(1 + f * oddsB) + q * Math.log(1 - f);
+      }
+
       return {
         sharePrice: price,
         edge,
         kellyPercentage: kellyPercent,
         betAmount: betAmt,
+        expectedGrowth,
       };
     });
   };
@@ -183,11 +226,78 @@ export default function Home() {
     setRegularResult(null);
   };
 
+  const computeComparisonBet = (
+    label: string,
+    priceStr: string,
+    probStr: string,
+    fees: boolean,
+    bankrollAmt: number,
+    fk: number
+  ): ComparisonBetResult | null => {
+    const price = parseFloat(priceStr) / 100;
+    const p = parseFloat(probStr) / 100;
+    if (
+      isNaN(price) || isNaN(p) ||
+      price <= 0 || price >= 1 || p <= 0 || p >= 1
+    ) {
+      return null;
+    }
+    const feePerShare = fees ? 0.03 * price * (1 - price) : 0;
+    const effectiveCost = price + feePerShare;
+    const oddsB = (1 - effectiveCost) / effectiveCost;
+    const q = 1 - p;
+    const kelly = (oddsB * p - q) / oddsB;
+    const fullKellyPct = Math.max(0, kelly * 100);
+    const fractionalKellyPct = fullKellyPct * fk;
+    const betAmount = (fractionalKellyPct / 100) * bankrollAmt;
+    const shares = effectiveCost > 0 ? betAmount / effectiveCost : 0;
+    const f = fractionalKellyPct / 100;
+    let expectedGrowth = 0;
+    if (f > 0 && f < 1) {
+      expectedGrowth = p * Math.log(1 + f * oddsB) + q * Math.log(1 - f);
+    }
+    const expectedGrowthPct = (Math.exp(expectedGrowth) - 1) * 100;
+    return {
+      label,
+      sharePrice: price,
+      probability: p,
+      feesEnabled: fees,
+      effectiveCost,
+      feePerShare,
+      edge: (p - effectiveCost) * 100,
+      fullKelly: fullKellyPct,
+      fractionalKellyPct,
+      betAmount,
+      shares,
+      expectedGrowth,
+      expectedGrowthPct,
+    };
+  };
+
+  const calculateComparison = () => {
+    const b = parseFloat(bankroll);
+    if (isNaN(b) || b <= 0) {
+      alert("Please enter a valid bankroll");
+      return;
+    }
+    const a = computeComparisonBet(bet1Label, bet1Price, bet1Prob, bet1Fees, b, fractionalKelly);
+    const c = computeComparisonBet(bet2Label, bet2Price, bet2Prob, bet2Fees, b, fractionalKelly);
+    if (!a || !c) {
+      alert("Please enter valid prices and probabilities for both bets");
+      return;
+    }
+    setComparisonResults({ a, b: c });
+    setRegularResult(null);
+    setPolymarketResults(null);
+  };
+
   const handleCalculate = () => {
     if (mode === "regular") {
       calculateRegularKelly();
-    } else {
+    } else if (mode === "polymarket") {
       calculatePolymarketKelly();
+    } else {
+      calculateComparison();
     }
   };
 
@@ -202,8 +312,17 @@ export default function Home() {
     setTeamBPrice("40");
     setEstimatedProbability("70");
     setFeesEnabled(true);
+    setBet1Label("Bet 1");
+    setBet1Price("60");
+    setBet1Prob("70");
+    setBet1Fees(true);
+    setBet2Label("Bet 2");
+    setBet2Price("45");
+    setBet2Prob("55");
+    setBet2Fees(true);
     setRegularResult(null);
     setPolymarketResults(null);
+    setComparisonResults(null);
   };
 
   const renderPolymarketPanel = (result: PolymarketPanelResult) => {
@@ -331,6 +450,16 @@ export default function Home() {
               }`}
             >
               Polymarket
+            </button>
+            <button
+              onClick={() => setMode("comparison")}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                mode === "comparison"
+                  ? "bg-purple-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              EG Comparison
             </button>
           </div>
         </div>
@@ -526,7 +655,7 @@ export default function Home() {
               </div>
             )}
           </div>
-        ) : (
+        ) : mode === "regular" ? (
           /* REGULAR: 2-column layout — Form | Results */
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             {/* Left: Calculator Form */}
@@ -719,6 +848,241 @@ export default function Home() {
                 </div>
               )}
             </div>
+          </div>
+        ) : (
+          /* COMPARISON: shared form on top, two bet inputs side by side, then comparison panel */
+          <div className="space-y-6">
+            {/* Top: Bankroll & Fractional Kelly */}
+            <div className="bg-purple-700 rounded-xl p-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-white font-medium mb-1 text-sm">
+                    Bankroll ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={bankroll}
+                    onChange={(e) => setBankroll(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-gray-900 bg-white"
+                    placeholder="10000"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-white font-medium text-sm">
+                      Fractional Kelly
+                    </label>
+                    <input
+                      type="number"
+                      value={fractionalKelly}
+                      onChange={(e) =>
+                        setFractionalKelly(parseFloat(e.target.value))
+                      }
+                      className="w-14 px-2 py-1 rounded text-gray-900 bg-white text-center text-sm"
+                      step="0.1"
+                      min="0.1"
+                      max="1"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.1"
+                    value={1.1 - fractionalKelly}
+                    onChange={(e) =>
+                      setFractionalKelly(
+                        Math.round((1.1 - parseFloat(e.target.value)) * 10) / 10
+                      )
+                    }
+                    className="w-full accent-purple-300"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Bet 1 & Bet 2 input cards */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {[
+                {
+                  label: bet1Label, setLabel: setBet1Label,
+                  price: bet1Price, setPrice: setBet1Price,
+                  prob: bet1Prob, setProb: setBet1Prob,
+                  fees: bet1Fees, setFees: setBet1Fees,
+                  key: "bet1",
+                },
+                {
+                  label: bet2Label, setLabel: setBet2Label,
+                  price: bet2Price, setPrice: setBet2Price,
+                  prob: bet2Prob, setProb: setBet2Prob,
+                  fees: bet2Fees, setFees: setBet2Fees,
+                  key: "bet2",
+                },
+              ].map((b) => (
+                <div key={b.key} className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                  <input
+                    type="text"
+                    value={b.label}
+                    onChange={(e) => b.setLabel(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-gray-900 bg-purple-50 border border-purple-200 font-bold text-lg"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-gray-700 font-medium mb-1 text-sm">
+                        Share Price (¢)
+                      </label>
+                      <input
+                        type="number"
+                        value={b.price}
+                        onChange={(e) => b.setPrice(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-gray-900 bg-white border border-gray-200"
+                        placeholder="60"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-700 font-medium mb-1 text-sm">
+                        Win Probability (%)
+                      </label>
+                      <input
+                        type="number"
+                        value={b.prob}
+                        onChange={(e) => b.setProb(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg text-gray-900 bg-white border border-gray-200"
+                        placeholder="70"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={b.fees}
+                      onChange={(e) => b.setFees(e.target.checked)}
+                      className="w-4 h-4 accent-purple-600 rounded"
+                    />
+                    <span className="text-gray-700 text-sm font-medium">
+                      Include Polymarket fees
+                    </span>
+                    <span className="text-gray-400 text-xs">(3% × p × (1−p))</span>
+                  </label>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-3 max-w-md mx-auto">
+              <button
+                onClick={handleReset}
+                className="flex-1 px-4 py-2 bg-white text-purple-700 border border-purple-200 rounded-full font-medium hover:bg-purple-50 transition-colors"
+              >
+                RESET
+              </button>
+              <button
+                onClick={handleCalculate}
+                className="flex-1 px-4 py-2 bg-gray-900 text-white rounded-full font-medium hover:bg-gray-800 transition-colors"
+              >
+                COMPARE
+              </button>
+            </div>
+
+            {/* Results */}
+            {comparisonResults && (() => {
+              const a = comparisonResults.a;
+              const b = comparisonResults.b;
+              const aWins = a.expectedGrowth > b.expectedGrowth;
+              const bWins = b.expectedGrowth > a.expectedGrowth;
+              let header: string;
+              let headerColor: string;
+              if (a.expectedGrowth <= 0 && b.expectedGrowth <= 0) {
+                header = "Neither bet has positive expected growth";
+                headerColor = "text-gray-500";
+              } else if (aWins) {
+                header = `${a.label} has better expected growth`;
+                headerColor = "text-green-700";
+              } else if (bWins) {
+                header = `${b.label} has better expected growth`;
+                headerColor = "text-green-700";
+              } else {
+                header = "Both bets are tied";
+                headerColor = "text-gray-700";
+              }
+
+              const renderCard = (r: ComparisonBetResult, isWinner: boolean) => (
+                <div
+                  className={`rounded-xl p-5 border-2 ${
+                    isWinner
+                      ? "border-green-400 bg-green-50"
+                      : "border-gray-200 bg-white"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-bold text-gray-900 text-lg">{r.label}</h4>
+                    {isWinner && r.expectedGrowth > 0 && (
+                      <span className="text-xs font-bold text-green-700 bg-green-100 px-2 py-1 rounded">
+                        BEST EG
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-3xl font-bold text-purple-700">
+                    {r.expectedGrowth > 0 ? "+" : ""}
+                    {r.expectedGrowthPct.toFixed(4)}%
+                  </p>
+                  <p className="text-xs text-gray-500 mb-3">
+                    expected growth per bet (ln G = {r.expectedGrowth.toFixed(5)})
+                  </p>
+                  <div className="text-sm space-y-1 border-t border-gray-200 pt-3">
+                    <p className="text-gray-700">
+                      <span className="font-semibold">Share price:</span>{" "}
+                      {Math.round(r.sharePrice * 100)}¢
+                      {r.feesEnabled && (
+                        <>
+                          {" "}+ fee {(r.feePerShare * 100).toFixed(2)}¢ ={" "}
+                          <span className="font-semibold">
+                            {(r.effectiveCost * 100).toFixed(2)}¢ effective
+                          </span>
+                        </>
+                      )}
+                    </p>
+                    <p className="text-gray-700">
+                      <span className="font-semibold">Your prob:</span>{" "}
+                      {(r.probability * 100).toFixed(1)}% |{" "}
+                      <span className="font-semibold">Edge:</span>{" "}
+                      <span className={r.edge > 0 ? "text-green-700" : "text-red-600"}>
+                        {r.edge > 0 ? "+" : ""}
+                        {r.edge.toFixed(2)}%
+                      </span>
+                    </p>
+                    <p className="text-gray-700">
+                      <span className="font-semibold">Full Kelly:</span>{" "}
+                      {r.fullKelly.toFixed(2)}% &rarr;{" "}
+                      <span className="font-semibold">
+                        Fractional ({fractionalKelly}x):
+                      </span>{" "}
+                      {r.fractionalKellyPct.toFixed(2)}%
+                    </p>
+                    <p className="text-gray-700">
+                      <span className="font-semibold">Bet:</span>{" "}
+                      ${r.betAmount.toFixed(2)} ({r.shares.toFixed(0)} shares)
+                    </p>
+                  </div>
+                </div>
+              );
+
+              return (
+                <div className="space-y-4">
+                  <div className="bg-white border border-gray-200 rounded-xl px-5 py-3 flex items-center justify-between">
+                    <h3 className="font-bold text-gray-900 text-lg">
+                      Expected Growth Comparison
+                    </h3>
+                    <span className={`font-semibold text-sm ${headerColor}`}>
+                      {header}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {renderCard(a, aWins && a.expectedGrowth > 0)}
+                    {renderCard(b, bWins && b.expectedGrowth > 0)}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
