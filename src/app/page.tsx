@@ -18,6 +18,7 @@ interface PolymarketRow {
   edge: number;
   kellyPercentage: number;
   betAmount: number;
+  shares: number;
   expectedGrowth: number;
 }
 
@@ -145,11 +146,14 @@ export default function Home() {
           estProb * Math.log(1 + f * oddsB) + q * Math.log(1 - f);
       }
 
+      const shares = effectiveCost > 0 ? betAmt / effectiveCost : 0;
+
       return {
         sharePrice: price,
         edge,
         kellyPercentage: kellyPercent,
         betAmount: betAmt,
+        shares,
         expectedGrowth,
       };
     });
@@ -369,7 +373,7 @@ export default function Home() {
             <tr className="bg-gray-50">
               <th className="px-3 py-2 text-left font-semibold text-gray-600">Price</th>
               <th className="px-3 py-2 text-left font-semibold text-gray-600">Edge</th>
-              <th className="px-3 py-2 text-left font-semibold text-gray-600">Kelly</th>
+              <th className="px-3 py-2 text-left font-semibold text-gray-600">Shares</th>
               <th className="px-3 py-2 text-left font-semibold text-gray-600">Bet</th>
             </tr>
           </thead>
@@ -401,9 +405,7 @@ export default function Home() {
                     {row.edge.toFixed(1)}%
                   </td>
                   <td className="px-3 py-1.5">
-                    {row.kellyPercentage > 0
-                      ? `${row.kellyPercentage.toFixed(1)}%`
-                      : "\u2014"}
+                    {row.shares > 0 ? row.shares.toFixed(0) : "\u2014"}
                   </td>
                   <td className="px-3 py-1.5 font-medium">
                     {row.betAmount > 0 ? `$${row.betAmount.toFixed(0)}` : "\u2014"}
